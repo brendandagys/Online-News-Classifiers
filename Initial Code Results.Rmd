@@ -1,0 +1,393 @@
+---
+title: "Classification and Regression Algorithms On Online News Popularity Dataset"
+author: "Brendan Dagys"
+date: "9/21/2018"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# PREPROCESSING
+
+```{r, message = FALSE}
+
+# install.packages('caret')
+library(caret)
+library(MASS)
+setwd('/')
+
+news = read.csv('/Users/brendan/Desktop/Personal R Projects/Online News Popularity/OnlineNewsPopularity.csv', header = TRUE)
+```
+
+Preliminary check of the data.
+
+```{r}
+summary(news)
+str(news)
+sum(is.na(news))
+```
+
+Filter out 1 outlier with high values in 'n_unique_tokens', 'n_non_stop_words', and 'n_non_stop_unique_tokens'.
+
+```{r}
+news = news[!news$n_unique_tokens == 701,]
+```
+
+Remove non-predictive variables.
+
+```{r}
+news = subset(news, select = -c(url, timedelta, is_weekend))
+```
+
+Convert categorical variables into factors with 2 levels.
+
+```{r}
+news$weekday_is_monday = factor(news$weekday_is_monday) 
+news$weekday_is_tuesday = factor(news$weekday_is_tuesday) 
+news$weekday_is_wednesday = factor(news$weekday_is_wednesday) 
+news$weekday_is_thursday = factor(news$weekday_is_thursday) 
+news$weekday_is_friday = factor(news$weekday_is_friday) 
+news$weekday_is_saturday = factor(news$weekday_is_saturday) 
+news$weekday_is_sunday = factor(news$weekday_is_sunday) 
+
+news$data_channel_is_lifestyle = factor(news$data_channel_is_lifestyle) 
+news$data_channel_is_entertainment = factor(news$data_channel_is_entertainment) 
+news$data_channel_is_bus = factor(news$data_channel_is_bus) 
+news$data_channel_is_socmed = factor(news$data_channel_is_socmed) 
+news$data_channel_is_tech = factor(news$data_channel_is_tech) 
+news$data_channel_is_world = factor(news$data_channel_is_world)
+```
+
+Plotting a histogram of the dependent variable shows a large right skew.
+
+```{r}
+hist(news$shares, xlim = c(0, 50000), ylim = c(0, 40000), breaks = 100)
+```
+
+I create a new table with the dependent variable changed by a log-transform.
+
+```{r}
+news_log = news
+news_log$shares = log(news_log$shares)
+```
+
+Let's plot a histogram.
+
+```{r}
+hist(log(news$shares))
+```
+
+This looks much better and resembles a normal distribution!
+
+Create a copy with a binary 'share' variable for > 1400 shares.
+
+```{r}
+news_binary = news
+news_binary$shares = as.factor(ifelse(news_binary$shares > 1400, 'high', 'low'))
+```
+
+# SAMPLING AND PARTITIONING
+
+Sample the dataset into 70% training and 30% test data.
+
+```{r}
+train_index = sample(nrow(news), as.integer(nrow(news) * 0.7))
+```
+
+Alternatively, we can use the 'caret' package to do the same sampling.
+
+```{r}
+# train_index = createDataPartition(y = news$shares, p = 0.7, list = FALSE)
+```
+
+Here, I generate training and test sets using the index.
+
+```{r}
+news_train = news[train_index,]
+news_test = news[-train_index,]
+
+news_log_train = news_log[train_index,]
+news_log_test = news_log[-train_index,]
+
+news_binary_train = news_binary[train_index,]
+news_binary_test = news_binary[-train_index,]
+```
+
+# LINEAR REGRESSION
+
+Fit a model using all variables, with 'shares' being the dependent variable.
+
+```{r}
+linear_model = lm(shares ~ ., data = news_train)
+summary(linear_model)
+```
+
+R-squared value is 0.02454 and adjusted is 0.0226, which are quite low.
+
+Calculating the RMSE gives us a value of 11244.83:
+
+```{r, warning = FALSE}
+predict_linear_model = predict(linear_model, news_test)
+sqrt(mean((predict_linear_model - news_test$shares)^2))
+```
+
+Let's try another linear regression using the log-transformed values.
+
+```{r}
+linear_model_log = lm(shares ~ ., data = news_log_train)
+summary(linear_model_log)
+```
+
+We now have a higher R-squared value of 0.1269 and adjusted: 0.1251
+The model can explain 12% of the variation of the 'shares' variable!
+
+This time the RMSE value is 0.8755.
+```{r}
+predict_linear_model_log = predict(linear_model_log, news_log_test)
+sqrt(mean((predict_linear_model_log - news_log_test$shares)^2))
+```
+
+Let's include only statistically significant variables. I'll use the Stepwise regression function.
+The Akaike Information Criterion is an estimator of the relative quality of statistical models for a given
+set of data. AIC estimates the quality of each model, relative to each of the other models. Thus, AIC
+provides a means for feature selection. AIC estimates the relative information lost when a given model is used
+to represent the process that generated the data. It does not provide absolute quality; only the quality relative
+to other data models. Given a set of candidate models for the data, the preferred model is the one with the
+minimum AIC value.
+
+Running the function backward yields a lower AIC than running forward (7143 vs. 7819)
+
+Backward is better!
+
+```{r, include = FALSE}
+null <- lm(shares ~ 1, data = news_log_train)
+full <- lm(shares ~ ., data = news_log_train)
+
+stepF <- stepAIC(null, scope = list(lower = null, upper = full), direction = 'forward', trace = TRUE)
+stepB <- stepAIC(full, direction = 'backward', trace = TRUE)
+linear_model_log_step = stepAIC(linear_model_log)
+```
+
+The code looks as follows. Because of the extremely long output, I will not print in the R Markdown file.
+
+null <- lm(shares ~ 1, data = news_log_train) \n
+full <- lm(shares ~ ., data = news_log_train)
+
+stepF <- stepAIC(null, scope = list(lower = null, upper = full), direction = 'forward', trace = TRUE) \n
+stepB <- stepAIC(full, direction = 'backward', trace = TRUE)
+
+```{r}
+summary(stepF)
+summary(stepB)
+```
+
+You can run the function this way to compute both at the same time!
+
+linear_model_log_step = stepAIC(linear_model_log)
+
+Only statistically significant variables remain:
+
+```{r}
+summary(linear_model_log_step)
+```
+
+Residual standard error: 0.8679
+R-squared: 0.1267
+Adjusted R-squared: 0.1254
+
+```{r}
+par(mar = c(2, 2, 2, 2))
+par(mfrow = c(2, 2))
+plot(linear_model_log_step)
+```
+
+The first plot is the residual vs. fitted plot.
+
+# DECISION TREE
+
+```{r, message = FALSE}
+# install.packages('party')
+library(party)
+
+news_binary_tree_model = ctree(shares ~ ., data = news_binary_train)
+news_binary_tree_pred = predict(news_binary_tree_model, newdata = news_binary_test)
+confusionMatrix(news_binary_test$shares, news_binary_tree_pred)
+```
+
+We get an accuracy of 0.6472
+
+Let's try another package!
+
+```{r}
+# install.packages('rpart')
+library(rpart)
+
+tree_model = rpart(shares ~ ., method = 'class', data = news_binary_train)
+tree_model_pred = predict(tree_model, method = 'class', newdata = news_binary_test)
+```
+
+The resulting prediction is a matrix with two columns. We must transform it into factor form and remove the second column.
+
+```{r}
+tree_model_pred[, 1] = sapply(tree_model_pred[, 1], function(x) ifelse(x >= 0.5, 'high', 'low'))
+tree_model_pred = as.factor(tree_model_pred[, 1])
+confusionMatrix(news_binary_test$shares, tree_model_pred)
+```
+
+We obtain a lower accuracy of 0.6139
+
+```{r}
+summary(tree_model)
+```
+
+Display cp table.
+
+```{r}
+printcp(tree_model)
+```
+
+If we wanted to create a postscript plot of the tree:
+
+```{r}
+# post(tree_model, file = filepath)
+```
+
+Now we will prune the tree to try and get a higher accuracy and reduce overfitting
+Typically, you will want to select a tree size that minimizes the cross-validated error,
+the xerror column printed by printcp( ). Use printcp( ) to examine the cross-validated error results, 
+select the complexity parameter associated with minimum error, and place it into the prune( ) function.
+
+```{r}
+prune(tree_model, cp = tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"])
+tree_model_pred = predict(tree_model, method = 'class', newdata = news_binary_test)
+tree_model_pred[, 1] = sapply(tree_model_pred[, 1], function(x) ifelse(x >=0.5, 'high', 'low'))
+tree_model_pred = as.factor(tree_model_pred[, 1])
+confusionMatrix(news_binary_test$shares, tree_model_pred)
+
+# plot(tree_model); text(tree_model)
+```
+
+This actually gave us the same accuracy of 0.6139. Perhaps pruning was not necessary in this instance.
+
+# Let's try regression trees to predict the continuous variable 'shares' from the 'news' dataframe
+
+```{r}
+news_tree_model = ctree(shares ~ ., data = news_train)
+news_tree_pred = predict(news_tree_model, newdata = news_test)
+
+summary(news_tree_pred)
+```
+
+3468 vs. 3365
+
+```{r}
+mean(news_test$shares); mean(news_tree_pred)
+```
+
+12505 vs. 1706
+
+```{r}
+sd(news_test$shares); sd(news_tree_pred)
+```
+
+The RMSE is 103.4774
+
+```{r}
+sqrt(mean(news_test$shares - news_tree_pred[, 1])^2)
+```
+
+This method's RMSE is far worse and likely INCORRECT: 12437.93
+
+```{r, message = FALSE}
+library(ModelMetrics)
+rmse(news_test$shares, news_tree_pred[, 1])
+```
+
+Using 'rpart' package this time.
+
+```{r}
+tree_model2 = rpart(shares ~ ., method = 'anova', data = news_train)
+tree_model_pred2 = predict(tree_model2, method = 'anova', newdata = news_test)
+```
+
+RMSE is 49.084. Second run, it is 282.949. I believe it varies as the training index is different each iteration.
+
+```{r}
+sqrt(mean(news_test$shares - tree_model_pred2)^2)
+```
+
+3566 vs. 3283
+
+```{r}
+mean(news_test$shares); mean(tree_model_pred2)
+```
+
+13562 vs. 1451
+
+```{r}
+sd(news_test$shares); sd(tree_model_pred2)
+```
+
+# NAIVE BAYES
+
+```{r}
+# install.packages('e1071')
+library(e1071)
+library(caret)
+
+naive_model = naiveBayes(shares ~ ., data = news_binary_train)
+naive_model
+
+naive_prediction = predict(naive_model, news_binary_test)
+confusionMatrix(news_binary_test$shares, naive_prediction)
+```
+
+This gives us an accuracy of 0.5915
+
+Let's try Naive Bayes again, but this time training the model.
+
+```{r, warning = FALSE}
+naive_model_trained = train(shares ~ ., data = news_binary_train, method = "nb", trControl = trainControl(method = 'cv', number = 10))
+naive_model_trained
+
+naive_trained_prediction = predict(naive_model_trained, news_binary_test)
+confusionMatrix(news_binary_test$shares, naive_trained_prediction)
+```
+
+This time we get an accuracy of 0.6116
+
+# RANDOM FOREST
+
+```{r, message = FALSE}
+# install.packages('randomForest')
+library(randomForest)
+
+forest_model = randomForest(shares ~ ., data = news_binary_train, ntree = 200)
+forest_model_pred = predict(forest_model, news_binary_test)
+
+# The random forest gives us an accuracy of 0.6612!
+confusionMatrix(news_binary_test$shares, forest_model_pred)
+```
+
+# kNN
+
+```{r}
+library(class)
+
+num_check = sapply(news, is.numeric)
+news_numeric_train = news_binary_train[, num_check]
+news_numeric_test = news_binary_test[, num_check]
+
+news_knn = knn(news_numeric_train[-45], news_numeric_test[-45], news_numeric_train$shares, 10)
+```
+
+We get an accuracy of 0.5656
+
+```{r}
+confusionMatrix(news_numeric_test$shares, news_knn)
+```
