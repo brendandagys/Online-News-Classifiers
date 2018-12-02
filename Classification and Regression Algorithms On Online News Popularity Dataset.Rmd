@@ -1,0 +1,495 @@
+---
+title: "Classification and Regression Algorithms On Online News Popularity Dataset"
+author: "Brendan Dagys"
+date: "9/21/2018"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# PREPROCESSING
+
+```{r, message = FALSE}
+
+# install.packages('caret')
+library(caret)
+library(MASS)
+setwd('/')
+
+news = read.csv('/Users/brendan/Desktop/Personal R Projects/Online News Popularity/OnlineNewsPopularity.csv', header = TRUE)
+```
+
+Preliminary check of the data.
+
+```{r}
+summary(news)
+str(news)
+sum(is.na(news))
+```
+
+Filter out 1 outlier with high values in 'n_unique_tokens', 'n_non_stop_words', and 'n_non_stop_unique_tokens'. Deduced from the summary function.
+
+```{r}
+news = news[!news$n_unique_tokens == 701,]
+```
+
+Remove non-predictive variables.
+
+```{r}
+news = subset(news, select = -c(url, timedelta, is_weekend))
+```
+
+Convert categorical variables into factors with 2 levels.
+
+```{r}
+news$weekday_is_monday = factor(news$weekday_is_monday) 
+news$weekday_is_tuesday = factor(news$weekday_is_tuesday) 
+news$weekday_is_wednesday = factor(news$weekday_is_wednesday) 
+news$weekday_is_thursday = factor(news$weekday_is_thursday) 
+news$weekday_is_friday = factor(news$weekday_is_friday) 
+news$weekday_is_saturday = factor(news$weekday_is_saturday) 
+news$weekday_is_sunday = factor(news$weekday_is_sunday) 
+
+news$data_channel_is_lifestyle = factor(news$data_channel_is_lifestyle) 
+news$data_channel_is_entertainment = factor(news$data_channel_is_entertainment) 
+news$data_channel_is_bus = factor(news$data_channel_is_bus) 
+news$data_channel_is_socmed = factor(news$data_channel_is_socmed) 
+news$data_channel_is_tech = factor(news$data_channel_is_tech) 
+news$data_channel_is_world = factor(news$data_channel_is_world)
+```
+
+Plotting a histogram of the dependent variable shows a large right skew.
+
+```{r}
+hist(news$shares, xlim = c(0, 50000), ylim = c(0, 40000), breaks = 100)
+```
+
+I create a new table with the dependent variable changed by a log-transform.
+
+```{r}
+news_log = news
+news_log$shares = log(news_log$shares)
+```
+
+Let's plot a histogram.
+
+```{r}
+hist(log(news$shares))
+```
+
+This looks much better and resembles a normal distribution!
+
+Create a copy with a binary 'share' variable for > 1400 shares.
+
+```{r}
+news_binary = news
+news_binary$shares = as.factor(ifelse(news_binary$shares > 1400, 'high', 'low'))
+```
+
+# SAMPLING AND PARTITIONING
+
+Sample the dataset into 70% training and 30% test data.
+
+```{r}
+train_index = sample(nrow(news), as.integer(nrow(news) * 0.7))
+```
+
+Alternatively, we can use the 'caret' package to do the same sampling.
+
+```{r}
+# train_index = createDataPartition(y = news$shares, p = 0.7, list = FALSE)
+```
+
+Here, I generate training and test sets using the index.
+
+```{r}
+news_train = news[train_index,]
+news_test = news[-train_index,]
+
+news_log_train = news_log[train_index,]
+news_log_test = news_log[-train_index,]
+
+news_binary_train = news_binary[train_index,]
+news_binary_test = news_binary[-train_index,]
+```
+
+# LINEAR REGRESSION
+
+Fit a model using all variables, with 'shares' being the dependent variable.
+
+```{r}
+set.seed(7)
+linear_model = lm(shares ~ ., data = news_train)
+summary(linear_model)
+```
+
+R-squared value is 0.02187 and adjusted is 0.01993, which are quite low.
+
+Calculating the RMSE gives us a value of 9679.06:
+
+```{r, warning = FALSE}
+predict_linear_model = predict(linear_model, news_test)
+sqrt(mean((predict_linear_model - news_test$shares)^2))
+```
+
+Let's try another linear regression using the log-transformed values.
+
+```{r}
+linear_model_log = lm(shares ~ ., data = news_log_train)
+summary(linear_model_log)
+```
+
+We now have a higher R-squared value of 0.1269 and adjusted: 0.1251
+The model can explain 12% of the variation of the 'shares' variable!
+
+This time the RMSE value is 0.8755.
+```{r}
+predict_linear_model_log = predict(linear_model_log, news_log_test)
+sqrt(mean((predict_linear_model_log - news_log_test$shares)^2))
+```
+
+# FEATURE SELECTION
+
+Using the p-values of the regression output to feature select:
+
+```{r}
+news_binary_train3 = news_binary_train[, c('num_hrefs', 'num_self_hrefs', 'num_imgs', 'average_token_length', 'num_keywords', 'data_channel_is_lifestyle', 'data_channel_is_entertainment', 'data_channel_is_bus', 'data_channel_is_socmed', 'data_channel_is_tech', 'kw_min_min', 'kw_min_max', 'kw_avg_max', 'kw_avg_max', 'kw_min_avg', 'kw_max_avg', 'kw_avg_avg', 'weekday_is_monday', 'weekday_is_tuesday', 'weekday_is_wednesday', 'weekday_is_thursday', 'weekday_is_friday', 'LDA_00', 'LDA_02', 'global_subjectivity', 'title_sentiment_polarity', 'abs_title_subjectivity', 'shares')]
+
+news_binary_test3 = news_binary_test[, c('num_hrefs', 'num_self_hrefs', 'num_imgs', 'average_token_length', 'num_keywords', 'data_channel_is_lifestyle', 'data_channel_is_entertainment', 'data_channel_is_bus', 'data_channel_is_socmed', 'data_channel_is_tech', 'kw_min_min', 'kw_min_max', 'kw_avg_max', 'kw_avg_max', 'kw_min_avg', 'kw_max_avg', 'kw_avg_avg', 'weekday_is_monday', 'weekday_is_tuesday', 'weekday_is_wednesday', 'weekday_is_thursday', 'weekday_is_friday', 'LDA_00', 'LDA_02', 'global_subjectivity', 'title_sentiment_polarity', 'abs_title_subjectivity', 'shares')]
+```
+
+Using the varImp function from caret to do some feature selection, and saving the top-15 into the array new_variables:
+
+```{r}
+importance = varImp(linear_model)
+importance[order(importance, decreasing = 1), , drop = F]
+(new_variables = rownames(importance[order(importance, decreasing = 1), , drop = F])[1:15])
+
+news_binary_train2 = news_binary_train[, c('kw_avg_avg', 'kw_max_avg', 'data_channel_is_entertainment', 'kw_min_avg', 'num_hrefs', 'data_channel_is_lifestyle', 'abs_title_subjectivity', 'self_reference_min_shares', 'average_token_length', 'data_channel_is_tech', 'data_channel_is_bus', 'data_channel_is_world', 'global_subjectivity', 'data_channel_is_socmed', 'n_tokens_title', 'num_self_hrefs', 'kw_min_min', 'global_rate_positive_words', 'n_tokens_content', 'self_reference_max_shares', 'shares')]
+
+news_binary_test2 = news_binary_test[, c('kw_avg_avg', 'kw_max_avg', 'data_channel_is_entertainment', 'kw_min_avg', 'num_hrefs', 'data_channel_is_lifestyle', 'abs_title_subjectivity', 'self_reference_min_shares', 'average_token_length', 'data_channel_is_tech', 'data_channel_is_bus', 'data_channel_is_world', 'global_subjectivity', 'data_channel_is_socmed', 'n_tokens_title', 'num_self_hrefs', 'kw_min_min', 'global_rate_positive_words', 'n_tokens_content', 'self_reference_max_shares', 'shares')]
+```
+
+Let's include only statistically significant variables. I'll use the Stepwise regression function.
+The Akaike Information Criterion is an estimator of the relative quality of statistical models for a given
+set of data. AIC estimates the quality of each model, relative to each of the other models. Thus, AIC
+provides a means for feature selection. AIC estimates the relative information lost when a given model is used
+to represent the process that generated the data. It does not provide absolute quality; only the quality relative
+to other data models. Given a set of candidate models for the data, the preferred model is the one with the
+minimum AIC value.
+
+Running the function backward yields a lower AIC than running forward (7143 vs. 7819)
+
+Backward is better!
+
+```{r, include = FALSE}
+null <- lm(shares ~ 1, data = news_log_train)
+full <- lm(shares ~ ., data = news_log_train)
+
+stepF <- stepAIC(null, scope = list(lower = null, upper = full), direction = 'forward', trace = TRUE)
+stepB <- stepAIC(full, direction = 'backward', trace = TRUE)
+linear_model_log_step = stepAIC(linear_model_log)
+```
+
+The code looks as follows. Because of the extremely long output, I will not print in the R Markdown file.
+
+null <- lm(shares ~ 1, data = news_log_train) \n
+full <- lm(shares ~ ., data = news_log_train)
+
+stepF <- stepAIC(null, scope = list(lower = null, upper = full), direction = 'forward', trace = TRUE) \n
+stepB <- stepAIC(full, direction = 'backward', trace = TRUE)
+
+```{r}
+summary(stepF)
+summary(stepB)
+```
+
+You can run the function this way to compute both at the same time!
+
+linear_model_log_step = stepAIC(linear_model_log)
+
+Only statistically significant variables remain:
+
+```{r}
+summary(linear_model_log_step)
+```
+
+Residual standard error: 0.8679
+R-squared: 0.1267
+Adjusted R-squared: 0.1254
+
+```{r}
+par(mar = c(2, 2, 2, 2))
+par(mfrow = c(2, 2))
+plot(linear_model_log_step)
+```
+
+The first plot is the residual vs. fitted plot.
+
+# DECISION TREE
+
+```{r, message = FALSE}
+# install.packages('party')
+library(party)
+
+news_binary_tree_model = ctree(shares ~ ., data = news_binary_train)
+news_binary_tree_pred = predict(news_binary_tree_model, newdata = news_binary_test)
+confusionMatrix(news_binary_test$shares, news_binary_tree_pred)
+```
+
+We get an accuracy of 0.6472
+
+Let's try another package!
+
+```{r}
+# install.packages('rpart')
+library(rpart)
+
+tree_model = rpart(shares ~ ., method = 'class', data = news_binary_train)
+tree_model_pred = predict(tree_model, method = 'class', newdata = news_binary_test)
+```
+
+The resulting prediction is a matrix with two columns. We must transform it into factor form and remove the second column.
+
+```{r}
+tree_model_pred[, 1] = sapply(tree_model_pred[, 1], function(x) ifelse(x >= 0.5, 'high', 'low'))
+tree_model_pred = as.factor(tree_model_pred[, 1])
+confusionMatrix(news_binary_test$shares, tree_model_pred)
+```
+
+We obtain a lower accuracy.
+
+```{r}
+summary(tree_model)
+```
+
+Display cp table.
+
+```{r}
+printcp(tree_model)
+```
+
+If we wanted to create a postscript plot of the tree:
+
+```{r}
+# post(tree_model, file = filepath)
+```
+
+Now we will prune the tree to try and get a higher accuracy and reduce overfitting
+Typically, you will want to select a tree size that minimizes the cross-validated error,
+the xerror column printed by printcp( ). Use printcp( ) to examine the cross-validated error results, 
+select the complexity parameter associated with minimum error, and place it into the prune( ) function.
+
+```{r}
+prune(tree_model, cp = tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"])
+tree_model_pred = predict(tree_model, method = 'class', newdata = news_binary_test)
+tree_model_pred[, 1] = sapply(tree_model_pred[, 1], function(x) ifelse(x >=0.5, 'high', 'low'))
+tree_model_pred = as.factor(tree_model_pred[, 1])
+confusionMatrix(news_binary_test$shares, tree_model_pred)
+
+# plot(tree_model); text(tree_model)
+```
+
+This actually gave us the same accuracy. Perhaps pruning was not necessary in this instance.
+
+# Let's try regression trees to predict the continuous variable 'shares' from the 'news' dataframe
+
+```{r}
+news_tree_model = ctree(shares ~ ., data = news_train)
+news_tree_pred = predict(news_tree_model, newdata = news_test)
+
+summary(news_tree_pred)
+```
+
+3468 vs. 3365
+
+```{r}
+mean(news_test$shares); mean(news_tree_pred)
+```
+
+The RMSE is 103.4774
+
+```{r}
+sqrt(mean(news_test$shares - news_tree_pred[, 1])^2)
+```
+
+Using 'rpart' package this time.
+
+```{r}
+tree_model2 = rpart(shares ~ ., method = 'anova', data = news_train)
+tree_model_pred2 = predict(tree_model2, method = 'anova', newdata = news_test)
+```
+
+RMSE is 49.084. Second run, it is 282.949. It varies as the training index is different each iteration.
+
+```{r}
+sqrt(mean(news_test$shares - tree_model_pred2)^2)
+```
+
+3566 vs. 3283
+
+```{r}
+mean(news_test$shares); mean(tree_model_pred2)
+```
+
+# NAIVE BAYES
+
+```{r}
+# install.packages('e1071')
+library(e1071)
+library(caret)
+
+naive_model = naiveBayes(shares ~ ., data = news_binary_train)
+naive_model
+
+naive_prediction = predict(naive_model, news_binary_test)
+caret::confusionMatrix(news_binary_test$shares, naive_prediction)
+```
+
+This gives us an accuracy of 0.5915
+
+Let's try Naive Bayes again, but this time training the model.
+
+```{r, warning = FALSE}
+naive_model_trained = train(shares ~ ., data = news_binary_train, method = "nb", trControl = trainControl(method = 'cv', number = 10))
+naive_model_trained
+
+naive_trained_prediction = predict(naive_model_trained, news_binary_test)
+caret::confusionMatrix(news_binary_test$shares, naive_trained_prediction)
+```
+
+This time we get an accuracy of 0.6116
+
+# kNN
+
+```{r}
+library(class)
+
+num_check = sapply(news, is.numeric)
+news_numeric_train = news_binary_train[, num_check]
+news_numeric_test = news_binary_test[, num_check]
+
+news_knn = knn(news_numeric_train[-45], news_numeric_test[-45], news_numeric_train$shares, 10)
+```
+
+We get an accuracy of 0.5656
+
+```{r}
+caret::confusionMatrix(news_numeric_test$shares, news_knn)
+```
+
+# LOGISTIC REGRESSION
+
+```{r}
+news_binary_train2 = news_binary_train
+news_binary_test2 = news_binary_test
+
+news_binary_train2[, 58] = sapply(news_binary_train2[, 58], function(x) ifelse(x == 'low', 0, 1))
+news_binary_test2[, 58] = sapply(news_binary_test2[, 58], function(x) ifelse(x == 'low', 0, 1))
+
+logistic_model = glm(shares ~ ., data = news_binary_train2, family = binomial)
+logistic_pred = predict(logistic_model, news_binary_test2, type = 'response')
+logistic_pred = ifelse(logistic_pred >= 0.5, 'high', 'low')
+```
+
+Accuracy is 0.6515
+
+```{r}
+caret::confusionMatrix(news_binary_test$shares, as.factor(logistic_pred))
+```
+
+# TRAIN FUNCTION EXPLORATION
+
+We will train the following: Naive Bayes, lm
+
+Accuracy = 0.6101
+
+```{r, message = FALSE}
+# install.packages('naivebayes')
+library(naivebayes)
+
+train_model = train(shares ~ ., data = news_binary_train, method = 'naive_bayes')
+train_pred = predict(train_model, news_binary_test)
+caret::confusionMatrix(news_binary_test$shares, train_pred)
+```
+
+RMSE = 0.8725 (0.8655 from my function), R-squared = 0.1297, adjusted R-squared = 0.128
+
+```{r, warning = FALSE}
+train_model2 = train(shares ~ ., data = news_log_train, method = 'lm')
+summary(train_model2)
+train_pred2 = predict(train_model2, news_log_test)
+sqrt(mean((train_pred2 - news_log_test$shares)^2))
+```
+
+# RANDOM FOREST
+
+```{r, message = FALSE}
+# install.packages('randomForest')
+library(randomForest)
+
+forest_model = randomForest(shares ~ ., data = news_binary_train, ntree = 200)
+forest_model_pred = predict(forest_model, news_binary_test)
+
+# The random forest gives us an accuracy of 0.6612!
+caret::confusionMatrix(news_binary_test$shares, forest_model_pred)
+```
+
+# RANDOM FOREST WITH FEATURE SELECTION FROM VARIMP
+
+```{r}
+forest_model = randomForest(shares ~ ., data = news_binary_train2, ntree = 200)
+forest_model_pred = predict(forest_model, news_binary_test2)
+
+# Using feature selection lowered our accuracy slightly.
+caret::confusionMatrix(news_binary_test2$shares, forest_model_pred)
+```
+
+# RANDOM FOREST WITH FEATURE SELECTION FROM REGRESSION P-VALUES
+
+```{r}
+forest_model = randomForest(shares ~ ., data = news_binary_train3, ntree = 200)
+forest_model_pred = predict(forest_model, news_binary_test3)
+
+# Using feature selection lowered our accuracy slightly.
+caret::confusionMatrix(news_binary_test3$shares, forest_model_pred)
+```
+
+# CROSS VALIDATION
+
+```{r}
+train_control = trainControl('cv', 10)
+train_model4 = train(shares ~ ., data = news_binary, method = 'rf', trControl = train_control)
+confusionMatrix(train_model4)
+```
+
+# QUESTION ANSWERING
+
+```{r}
+# Does posting an article on a certain day of the week increase its chance of being shared on social media?
+
+# 3903
+mean(news$shares[news$weekday_is_saturday == 1 | news$weekday_is_sunday == 1])
+
+# 3319
+mean(news$shares[news$weekday_is_saturday == 0 & news$weekday_is_sunday == 0])
+
+# Does a lengthy title reduce an article’s chance of being shared on social media?
+
+# 0.09
+cor(news$n_tokens_title, news$shares)
+plot(news$n_tokens_title, news$shares)
+
+# What genre of article (i.e. business, lifestyle, sports) is most likely to be shared on social media?
+mean(news$shares[news$data_channel_is_bus])
+mean(news$shares[news$data_channel_is_entertainment])
+mean(news$shares[news$data_channel_is_lifestyle])
+mean(news$shares[news$data_channel_is_socmed])
+mean(news$shares[news$data_channel_is_tech])
+mean(news$shares[news$data_channel_is_world])
+```
